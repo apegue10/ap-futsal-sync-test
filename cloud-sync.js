@@ -34,51 +34,152 @@
     const element = document.getElementById(id);
     return element ? element.value.trim() : '';
   }
+  let refreshInFlight = null;
+
+  function saveSession(session) {
+    if (!session || !session.access_token) {
+      throw new Error('No se recibió una sesión válida.');
+    }
+
+    const saved = {
+      ...(getSession() || {}),
+      ...session,
+      expires_at: session.expires_at ||
+        (session.expires_in
+          ? Math.floor(Date.now() / 1000) + Number(session.expires_in)
+          : null)
+    };
+
+    localStorage.setItem(SESSION_KEY, JSON.stringify(saved));
+    return saved;
+  }
+
+  async function refreshSession() {
+    if (refreshInFlight) return refreshInFlight;
+
+    refreshInFlight = (async () => {
+      const session = getSession();
+
+      if (!session || !session.refresh_token) {
+        throw new Error(
+          'La sesión ha caducado. Conéctate a Internet e inicia sesión de nuevo.'
+        );
+      }
+
+      const response = await fetch(
+        AP_CLOUD_URL.replace(/\/$/, '') +
+          '/auth/v1/token?grant_type=refresh_token',
+        {
+          method: 'POST',
+          headers: {
+            apikey: AP_CLOUD_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            refresh_token: session.refresh_token
+          })
+        }
+      );
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data || !data.access_token) {
+        throw new Error(
+          data?.message ||
+          data?.msg ||
+          'No se pudo renovar la sesión. Inicia sesión de nuevo.'
+        );
+      }
+
+      return saveSession(data);
+    })();
+
+    try {
+      return await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
+    }
+  }
 
   async function request(path, options = {}) {
     if (
       !AP_CLOUD_URL || AP_CLOUD_URL.startsWith('__') ||
       !AP_CLOUD_KEY || AP_CLOUD_KEY.startsWith('__')
     ) {
-      throw new Error('La conexión con Supabase todavía no está configurada.');
-    }
-
-    const session = getSession();
-    const headers = {
-      apikey: AP_CLOUD_KEY,
-      'Content-Type': 'application/json',
-      ...(session && session.access_token
-        ? { Authorization: 'Bearer ' + session.access_token }
-        : {}),
-      ...(options.headers || {})
-    };
-
-    const response = await fetch(
-      AP_CLOUD_URL.replace(/\/$/, '') + path,
-      { ...options, headers }
-    );
-
-    const raw = await response.text();
-    let data;
-
-    try {
-      data = raw ? JSON.parse(raw) : null;
-    } catch (_) {
-      data = raw;
-    }
-
-    if (!response.ok) {
       throw new Error(
-        data && (data.message || data.msg || data.error_description || data.details)
-          ? (data.message || data.msg || data.error_description || data.details)
-          : (typeof data === 'string' && data
-              ? data
-              : 'Error HTTP ' + response.status)
+        'La conexión con Supabase todavía no está configurada.'
       );
     }
 
-    return data;
-  }
+    const isAuthFlow =
+      path.startsWith('/auth/v1/token?grant_type=password') ||
+      path.startsWith('/auth/v1/signup') ||
+      path.startsWith('/auth/v1/token?grant_type=refresh_token');
+
+    let session = getSession();
+
+    if (
+      !isAuthFlow &&
+      session?.refresh_token &&
+      session.expires_at &&
+      Number(session.expires_at) * 1000 <= Date.now() + 60000
+    ) {
+      session = await refreshSession();
+    }
+
+    async function send() {
+      const headers = {
+        apikey: AP_CLOUD_KEY,
+        'Content-Type': 'application/json',
+        ...(session?.access_token
+          ? { Authorization: 'Bearer ' + session.access_token }
+          : {}),
+        ...(options.headers || {})
+      };
+
+      const response = await fetch(
+        AP_CLOUD_URL.replace(/\/$/, '') + path,
+        { ...options, headers }
+      );
+
+      const raw = await response.text();
+      let data;
+
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (_) {
+        data = raw;
+      }
+
+      return { response, data };
+    }
+
+    let result = await send();
+
+    if (
+      result.response.status === 401 &&
+      !isAuthFlow &&
+      session?.refresh_token
+    ) {
+      session = await refreshSession();
+      result = await send();
+    }
+
+    if (!result.response.ok) {
+      const data = result.data;
+      throw new Error(
+        data?.message ||
+        data?.msg ||
+        data?.error_description ||
+        data?.details ||
+        (typeof data === 'string' && data
+          ? data
+          : 'Error HTTP ' + result.response.status)
+      );
+    }
+
+    return result.data;
+       }
 
   function requireSession() {
     const session = getSession();
@@ -128,7 +229,7 @@
         throw new Error('No se recibió una sesión válida.');
       }
 
-      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+      saveSession(data);
       status('cloud-auth-status', 'Sesión iniciada: ' + (data.user?.email || email));
       refreshStatus();
     } catch (error) {
@@ -151,7 +252,7 @@
       });
 
       if (data && data.access_token) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+        saveSession(data);
         status('cloud-auth-status', 'Cuenta creada y sesión iniciada: ' + email);
         refreshStatus();
       } else {
