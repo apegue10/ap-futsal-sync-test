@@ -229,7 +229,7 @@
         throw new Error('No se recibió una sesión válida.');
       }
 
-      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+      saveSession(data);
       status('cloud-auth-status', 'Sesión iniciada: ' + (data.user?.email || email));
       refreshStatus();
     } catch (error) {
@@ -252,7 +252,7 @@
       });
 
       if (data && data.access_token) {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+        saveSession(data);
         status('cloud-auth-status', 'Cuenta creada y sesión iniciada: ' + email);
         refreshStatus();
       } else {
