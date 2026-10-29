@@ -5,7 +5,7 @@
   'use strict';
 
   const AP_CLOUD_URL = 'https://hzcqbmrefjxpuchshgkr.supabase.co';
-  const AP_CLOUD_KEY = 'sb_publishable_--MaRbI4MHYgd-yTJGmVOw_vtVD4zBj';
+  const AP_CLOUD_KEY = 'sb_publishable_-URM75mTiyLMbOh112uhgw_f-cM6LGF';
   const SESSION_KEY = 'ap-futsal-cloud-session-v1';
   const TEAM_KEY = 'ap-futsal-cloud-team-v1';
 
