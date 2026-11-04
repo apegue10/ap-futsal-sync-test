@@ -157,7 +157,7 @@ function renderStats(){
  const selectedComp=document.getElementById('stats-competition-filter')?.value||'__all__'; const filteredAll=selectedComp==='__all__'?all:all.filter(m=>(m.competition||'')===selectedComp);
  const agg=new Map(); filteredAll.forEach(m=>(m.players||[]).filter(p=>((p.secondsP1||0)+(p.secondsP2||0)>0)||(p.goals||0)||(p.assists||0)||(p.goalsFor||0)||(p.goalsAgainst||0)||(p.yellows||0)||(p.doubleYellows||0)||(p.reds||0)).forEach(p=>{const k=String(p.playerId??(p.number+'-'+p.name));if(!agg.has(k))agg.set(k,{number:p.number,name:p.name,matches:0,seconds:0,goals:0,assists:0,gf:0,ga:0,yellows:0,doubleYellows:0,reds:0,seen:new Set()});const a=agg.get(k);a.number=p.number;a.name=p.name;if(!a.seen.has(m.id)){a.matches++;a.seen.add(m.id)}a.seconds+=p.secondsP1+p.secondsP2;a.goals+=p.goals||0;a.assists+=p.assists||0;a.gf+=p.goalsFor||0;a.ga+=p.goalsAgainst||0;a.yellows+=p.yellows||0;a.doubleYellows+=p.doubleYellows||0;a.reds+=p.reds||0;}));
  document.getElementById('career-stats-body').innerHTML=[...agg.values()].sort((a,b)=>Number(a.number)-Number(b.number)).map(a=>`<tr><td>#${esc(a.number)} ${esc(a.name)}</td><td>${a.matches}</td><td>${formatTime(a.seconds)}</td><td>${a.goals}</td><td>${a.assists}</td><td>${a.gf}</td><td>${a.ga}</td><td>${a.yellows}</td><td>${a.doubleYellows}</td><td>${a.reds}</td></tr>`).join('')||'<tr><td colspan="10">Todavía no hay estadísticas registradas.</td></tr>';
- const history=[...S.matchHistory];if(matchHasActivity())history.push(snapshotMatch('Partido actual',false));document.getElementById('match-history-body').innerHTML=history.slice().reverse().map(m=>`<tr><td>${esc(m.dateLabel||m.date||'—')}</td><td>${esc(m.venue||'—')}</td><td>${esc(m.teamName||'Equipo')}</td><td>${esc(m.rivalName||'—')}</td><td>${esc(m.competition||'—')}</td><td>${m.scoreNos??0} - ${m.scoreRiv??0}${m.status==='actual'?' (actual)':''}</td><td>${(m.events||[]).length}</td><td>${m.status==='actual'?'—':`<button class="danger small" onclick="deleteSavedMatch('${m.id}')">Eliminar</button>`}</td></tr>`).join('')||'<tr><td colspan="8">Los partidos guardados aparecerán aquí.</td></tr>';
+ const history=[...S.matchHistory];if(matchHasActivity())history.push(snapshotMatch('Partido actual',false));document.getElementById('match-history-body').innerHTML=history.slice().reverse().map(m=>`<tr><td>${esc(m.dateLabel||m.date||'—')}</td><td>${esc(m.venue||'—')}</td><td>${esc(m.teamName||'Equipo')}</td><td>${esc(m.rivalName||'—')}</td><td>${esc(m.competition||'—')}</td><td>${m.scoreNos??0} - ${m.scoreRiv??0}${m.status==='actual'?' (actual)':''}</td><td>${(m.events||[]).length}</td><td>${m.status==='actual'?'—':`<button class="blue small" onclick="viewSavedMatch('${m.id}')">Ver estadísticas</button> <button class="danger small" onclick="deleteSavedMatch('${m.id}')">Eliminar</button>`}</td></tr>`).join('')||'<tr><td colspan="8">Los partidos guardados aparecerán aquí.</td></tr>';
 }
 function matchHasActivity(){return (S.events||[]).length>0||S.scoreNos>0||S.scoreRiv>0||S.players.some(p=>(p.secondsP1||0)+(p.secondsP2||0)>0)}
 function snapshotMatch(label='Partido',archived=true){const date=new Date();return {id:label==='Partido actual'?'current':('m-'+date.getTime()),date:date.toISOString(),dateLabel:date.toLocaleDateString('es-ES'),teamName:S.teamName||'Equipo',rivalName:S.rivalName||'Rival',competition:S.competition||'',venue:S.venue||'Local',scoreNos:S.scoreNos,scoreRiv:S.scoreRiv,foulsNos:S.foulsNos||0,foulsRiv:S.foulsRiv||0,status:archived?'archived':'actual',events:JSON.parse(JSON.stringify(S.events||[])),players:S.players.map(p=>({playerId:p.id,number:p.number,name:p.name,secondsP1:p.secondsP1||0,secondsP2:p.secondsP2||0,goals:p.goals||0,assists:p.assists||0,goalsFor:p.goalsFor||0,goalsAgainst:p.goalsAgainst||0,yellows:p.yellows||0,doubleYellows:p.doubleYellows||0,reds:p.reds||0}))}}
@@ -183,9 +183,64 @@ function importBackup(e){const f=e.target.files[0];if(!f)return;const rd=new Fil
 function download(data,name,type){const a=document.createElement('a'),u=URL.createObjectURL(new Blob([data],{type}));a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
 function saveCurrentMatch(){syncClock();if(!matchHasActivity()){alert('Este partido está vacío. Registra algún dato antes de guardarlo.');return;}const m=snapshotMatch('Partido',true);m.id='m-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);m.status='archived';S.matchHistory.push(m);S.running=false;S.startedAt=null;S.endAt=null;S.scoreNos=0;S.scoreRiv=0;S.foulsNos=0;S.foulsRiv=0;S.period=1;S.remaining=S.halfLength*60;S.startRemaining=S.remaining;S.lastElapsedSynced=0;S.slots=[null,null,null,null,null];S.events=[];S.players.forEach(p=>{p.secondsP1=0;p.secondsP2=0;p.goals=0;p.assists=0;p.goalsFor=0;p.goalsAgainst=0;p.yellows=0;p.doubleYellows=0;p.reds=0;p.ejected=false;p.plusMinus=0});save();renderAll();switchView('partido');alert('Partido guardado en el historial con sus estadísticas y eventos. El partido actual se ha dejado en blanco para el siguiente.');}
 function deleteCurrentMatch(){if(!confirm('¿Eliminar TODOS los datos del partido actual (marcador, tiempos, goles, tarjetas y eventos)? Los partidos ya guardados en el historial y la plantilla base se conservarán.'))return;S.running=false;S.startedAt=null;S.endAt=null;S.scoreNos=0;S.scoreRiv=0;S.foulsNos=0;S.foulsRiv=0;S.period=1;S.remaining=S.halfLength*60;S.startRemaining=S.remaining;S.lastElapsedSynced=0;S.slots=[null,null,null,null,null];S.events=[];S.players.forEach(p=>{p.secondsP1=0;p.secondsP2=0;p.goals=0;p.assists=0;p.goalsFor=0;p.goalsAgainst=0;p.yellows=0;p.doubleYellows=0;p.reds=0;p.ejected=false;p.plusMinus=0});save();renderAll();switchView('partido');alert('Partido actual eliminado. La plantilla guardada y el historial no se han borrado.');}
-function deleteSavedMatch(id){if(!confirm('¿Eliminar este partido del historial? Sus estadísticas dejarán de contar en las estadísticas generales.'))return;S.matchHistory=S.matchHistory.filter(m=>m.id!==id);save();renderStats();}
+function savedMatchEventText(e){
+ return e.type||e.action||e.event||e.description||'Evento';
+}
+
+function closeSavedMatch(){
+ const panel=document.getElementById('saved-match-report');
+ if(panel)panel.style.display='none';
+}
+
+function viewSavedMatch(id){
+ const m=S.matchHistory.find(x=>String(x.id)===String(id));
+ if(!m){alert('No se ha encontrado el partido.');return;}
+ const panel=document.getElementById('saved-match-report');
+ const content=document.getElementById('saved-match-report-content');
+ if(!panel||!content){alert('No se encuentra el panel de estadísticas.');return;}
+
+ const players=m.players||[];
+ const events=m.events||[];
+
+ content.innerHTML=`
+  <h3>${esc(m.teamName||'Equipo')} ${m.scoreNos??0} - ${m.scoreRiv??0} ${esc(m.rivalName||'Rival')}</h3>
+  <p>Fecha: ${esc(m.dateLabel||m.date||'—')}</p>
+  <p>Competición: ${esc(m.competition||'—')} · ${esc(m.venue||'—')}</p>
+  <h3>Estadísticas individuales</h3>
+  <div class="table-wrap">
+   <table class="stats-table">
+    <thead><tr><th>Jugador</th><th>Minutos</th><th>1.ª parte</th><th>2.ª parte</th><th>Goles</th><th>Asistencias</th><th>Goles a favor</th><th>Goles en contra</th><th>Amarillas</th><th>Doble amarilla</th><th>Rojas</th></tr></thead>
+    <tbody>${players.map(p=>`<tr>
+     <td>#${esc(p.number)} ${esc(p.name)}</td>
+     <td>${formatTime((p.secondsP1||0)+(p.secondsP2||0))}</td>
+     <td>${formatTime(p.secondsP1||0)}</td>
+     <td>${formatTime(p.secondsP2||0)}</td>
+     <td>${p.goals||0}</td>
+     <td>${p.assists||0}</td>
+     <td>${p.goalsFor||0}</td>
+     <td>${p.goalsAgainst||0}</td>
+     <td>${p.yellows||0}</td>
+     <td>${p.doubleYellows||0}</td>
+     <td>${p.reds||0}</td>
+    </tr>`).join('')}</tbody>
+   </table>
+  </div>
+  <h3>Eventos del partido</h3>
+  <p>${events.length?events.map(e=>esc(savedMatchEventText(e))).join(' · '):'No hay eventos registrados.'}</p>
+ `;
+ panel.style.display='block';
+}
+  function deleteSavedMatch(id){if(!confirm('¿Eliminar este partido del historial? Sus estadísticas dejarán de contar en las estadísticas generales.'))return;S.matchHistory=S.matchHistory.filter(m=>m.id!==id);save();renderStats();}
 function clearMatchHistory(){if(!confirm('¿Borrar TODOS los partidos guardados del historial? Esta acción no se puede deshacer.'))return;S.matchHistory=[];save();renderStats();alert('Historial eliminado. El partido actual no se ha modificado.');}
-function newMatch(){if(!confirm('El partido actual se guardará en el historial y se iniciará otro. La plantilla y las estadísticas generales se conservarán. ¿Continuar?'))return;syncClock();archiveCurrentMatch();S.running=false;S.startedAt=null;S.endAt=null;S.scoreNos=0;S.scoreRiv=0;S.foulsNos=0;S.foulsRiv=0;S.period=1;S.remaining=S.halfLength*60;S.startRemaining=S.remaining;S.slots=[null,null,null,null,null];S.events=[];S.players.forEach(p=>{p.secondsP1=0;p.secondsP2=0;p.goals=0;p.assists=0;p.goalsFor=0;p.goalsAgainst=0;p.yellows=0;p.doubleYellows=0;p.reds=0;p.ejected=false;p.plusMinus=0});save();renderAll();switchView('partido')}
+<section id="saved-match-report" class="panel" style="display:none;margin-top:16px">
+ <h2>Estadísticas del partido</h2>
+ <div class="tools">
+  <button class="primary" onclick="exportPDF('saved-match-report')">Exportar estadísticas a PDF</button>
+  <button onclick="closeSavedMatch()">Cerrar</button>
+ </div>
+ <div id="saved-match-report-content"></div>
+</section>
+  function newMatch(){if(!confirm('El partido actual se guardará en el historial y se iniciará otro. La plantilla y las estadísticas generales se conservarán. ¿Continuar?'))return;syncClock();archiveCurrentMatch();S.running=false;S.startedAt=null;S.endAt=null;S.scoreNos=0;S.scoreRiv=0;S.foulsNos=0;S.foulsRiv=0;S.period=1;S.remaining=S.halfLength*60;S.startRemaining=S.remaining;S.slots=[null,null,null,null,null];S.events=[];S.players.forEach(p=>{p.secondsP1=0;p.secondsP2=0;p.goals=0;p.assists=0;p.goalsFor=0;p.goalsAgainst=0;p.yellows=0;p.doubleYellows=0;p.reds=0;p.ejected=false;p.plusMinus=0});save();renderAll();switchView('partido')}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 let lastPaintedSecond=null;
 // Registrar el pulso del cronómetro antes del render inicial para que un fallo visual no lo deje sin arrancar.
