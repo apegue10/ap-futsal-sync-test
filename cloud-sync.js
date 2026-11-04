@@ -1,5 +1,6 @@
+
 /* AP FUTSAL — sincronización en la nube
-   Rama de pruebas: sync-prep
+   Rama de pruebas: session-auto-refresh-test
 */
 (() => {
   'use strict';
@@ -8,6 +9,11 @@
   const AP_CLOUD_KEY = 'sb_publishable_-URM75mTiyLMbOh112uhgw_f-cM6LGF';
   const SESSION_KEY = 'ap-futsal-cloud-session-v1';
   const TEAM_KEY = 'ap-futsal-cloud-team-v1';
+  const PENDING_KEY = 'ap-futsal-cloud-pending-matches-v1';
+
+  let refreshInFlight = null;
+  let syncInFlight = null;
+  let syncTimer = null;
 
   function getSession() {
     try {
@@ -25,6 +31,19 @@
     }
   }
 
+  function pendingMatches() {
+    try {
+      const value = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function savePendingMatches(matches) {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(matches));
+  }
+
   function status(id, message) {
     const element = document.getElementById(id);
     if (element) element.textContent = message;
@@ -34,7 +53,6 @@
     const element = document.getElementById(id);
     return element ? element.value.trim() : '';
   }
-  let refreshInFlight = null;
 
   function saveSession(session) {
     if (!session || !session.access_token) {
@@ -179,7 +197,7 @@
     }
 
     return result.data;
-       }
+  }
 
   function requireSession() {
     const session = getSession();
@@ -232,6 +250,7 @@
       saveSession(data);
       status('cloud-auth-status', 'Sesión iniciada: ' + (data.user?.email || email));
       refreshStatus();
+      syncPendingMatches();
     } catch (error) {
       status('cloud-auth-status', 'Error al iniciar sesión: ' + error.message);
     }
@@ -298,12 +317,14 @@
 
   function resultId(result, rpcName) {
     if (typeof result === 'string') return result;
+
     if (Array.isArray(result)) {
       const first = result[0];
       return typeof first === 'string'
         ? first
         : first && (first.id || first[rpcName]);
     }
+
     return result && (result.id || result[rpcName]);
   }
 
@@ -357,9 +378,66 @@
     }
   }
 
+  async function uploadState() {
+    const session = requireSession();
+    const team = getTeam();
+
+    if (!team || !team.id) {
+      throw new Error('Crea un equipo o únete a uno primero.');
+    }
+
+    if (
+      typeof S === 'undefined' ||
+      typeof STORAGE_KEY === 'undefined' ||
+      typeof TEMPLATE_KEY === 'undefined'
+    ) {
+      throw new Error('La aplicación principal todavía no está conectada.');
+    }
+
+    if (!navigator.onLine) {
+      throw new Error('No hay conexión. El partido permanece guardado en este dispositivo.');
+    }
+
+    const existing = await request(
+      '/rest/v1/team_app_data?team_id=eq.' +
+      encodeURIComponent(team.id) + '&select=updated_by'
+    );
+
+    if (
+      Array.isArray(existing) &&
+      existing.length &&
+      existing[0].updated_by &&
+      existing[0].updated_by !== session.user.id
+    ) {
+      throw new Error(
+        'La nube fue actualizada por otra cuenta. No se han subido cambios para evitar sobrescribir sus datos.'
+      );
+    }
+
+    const templateRaw = localStorage.getItem(TEMPLATE_KEY);
+    const payload = {
+      format: 1,
+      state: S,
+      template: templateRaw ? JSON.parse(templateRaw) : null
+    };
+
+    await request('/rest/v1/team_app_data?on_conflict=team_id', {
+      method: 'POST',
+      headers: {
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify({
+        team_id: team.id,
+        payload,
+        updated_by: session.user.id,
+        updated_at: new Date().toISOString()
+      })
+    });
+  }
+
   async function cloudPush() {
     try {
-      const session = requireSession();
+      requireSession();
       const team = getTeam();
 
       if (!team || !team.id) {
@@ -370,35 +448,8 @@
         'Se compartirán los datos actuales del partido y la plantilla con el equipo. ¿Continuar?'
       )) return;
 
-      if (
-        typeof S === 'undefined' ||
-        typeof STORAGE_KEY === 'undefined' ||
-        typeof TEMPLATE_KEY === 'undefined'
-      ) {
-        throw new Error('La aplicación principal todavía no está conectada.');
-      }
-
-      const templateRaw = localStorage.getItem(TEMPLATE_KEY);
-
-      const payload = {
-        format: 1,
-        state: S,
-        template: templateRaw ? JSON.parse(templateRaw) : null
-      };
-
-      await request('/rest/v1/team_app_data?on_conflict=team_id', {
-        method: 'POST',
-        headers: {
-          Prefer: 'resolution=merge-duplicates,return=minimal'
-        },
-        body: JSON.stringify({
-          team_id: team.id,
-          payload,
-          updated_by: session.user.id,
-          updated_at: new Date().toISOString()
-        })
-      });
-
+      await uploadState();
+      savePendingMatches([]);
       status('cloud-team-status', 'Datos subidos correctamente.');
     } catch (error) {
       status('cloud-team-status', 'Error al subir los datos: ' + error.message);
@@ -412,6 +463,12 @@
       const team = getTeam();
       if (!team || !team.id) {
         throw new Error('Crea un equipo o únete a uno primero.');
+      }
+
+      if (pendingMatches().length) {
+        throw new Error(
+          'Hay partidos pendientes de subir. Conéctate a Internet y sincronízalos antes de descargar datos.'
+        );
       }
 
       if (!confirm(
@@ -457,6 +514,93 @@
     }
   }
 
+  function queueArchivedMatch(matchId) {
+    if (!matchId) return;
+
+    const pending = pendingMatches();
+    if (!pending.includes(matchId)) {
+      pending.push(matchId);
+      savePendingMatches(pending);
+    }
+
+    if (!navigator.onLine) {
+      status(
+        'cloud-team-status',
+        'Partido guardado en este dispositivo. Se sincronizará al recuperar Internet.'
+      );
+      return;
+    }
+
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(syncPendingMatches, 1200);
+  }
+
+  async function syncPendingMatches() {
+    if (syncInFlight) return syncInFlight;
+    if (!navigator.onLine || !pendingMatches().length) return;
+
+    syncInFlight = (async () => {
+      const batch = pendingMatches().slice();
+
+      try {
+        await uploadState();
+
+        const remaining = pendingMatches().filter(id => !batch.includes(id));
+        savePendingMatches(remaining);
+
+        status(
+          'cloud-team-status',
+          remaining.length
+            ? 'Partido sincronizado. Quedan partidos pendientes.'
+            : 'Partidos pendientes sincronizados correctamente.'
+        );
+      } catch (error) {
+        status(
+          'cloud-team-status',
+          'Partido guardado localmente. Pendiente de sincronizar: ' + error.message
+        );
+      }
+    })();
+
+    try {
+      await syncInFlight;
+    } finally {
+      syncInFlight = null;
+    }
+  }
+
+  function installMatchQueue() {
+    function wrapArchiveFunction(name) {
+      const original = window[name];
+      if (typeof original !== 'function' || original.__apCloudWrapped) return;
+
+      const wrapped = function (...args) {
+        const before = new Set(
+          Array.isArray(S?.matchHistory)
+            ? S.matchHistory.map(match => match && match.id).filter(Boolean)
+            : []
+        );
+
+        const result = original.apply(this, args);
+
+        const history = Array.isArray(S?.matchHistory) ? S.matchHistory : [];
+        history.forEach(match => {
+          if (match && match.id && !before.has(match.id)) {
+            queueArchivedMatch(match.id);
+          }
+        });
+
+        return result;
+      };
+
+      wrapped.__apCloudWrapped = true;
+      window[name] = wrapped;
+    }
+
+    wrapArchiveFunction('archiveCurrentMatch');
+    wrapArchiveFunction('saveCurrentMatch');
+  }
+
   window.cloudSignIn = cloudSignIn;
   window.cloudSignUp = cloudSignUp;
   window.cloudSignOut = cloudSignOut;
@@ -465,5 +609,18 @@
   window.cloudPush = cloudPush;
   window.cloudPull = cloudPull;
 
-  window.addEventListener('load', refreshStatus);
+  window.addEventListener('online', syncPendingMatches);
+
+  window.addEventListener('load', () => {
+    refreshStatus();
+    installMatchQueue();
+    syncPendingMatches();
+  });
+
+  // Permite instalar la cola también si este archivo se carga después del evento load.
+  if (document.readyState === 'complete') {
+    installMatchQueue();
+    syncPendingMatches();
+  }
 })();
+       
