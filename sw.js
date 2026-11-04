@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ap-futsal-iphone-v3';
+const CACHE_NAME = 'ap-futsal-iphone-v4';
 
 const APP_FILES = [
   './',
