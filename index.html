@@ -74,7 +74,15 @@
 <section id="view-estadisticas" class="view"><div class="panel"><h2>Estadísticas del partido actual</h2><div class="tools"><button class="primary" onclick="exportPDF('view-estadisticas')">Exportar estadísticas PDF</button><button onclick="exportCSV()">Exportar CSV para Excel</button><button onclick="exportBackup()">Copia de seguridad JSON</button><label class="small" style="background:#26364b;border-radius:10px;padding:8px 10px;cursor:pointer">Restaurar copia<input type="file" accept="application/json,.json" style="display:none" onchange="importBackup(event)"></label></div><div class="table-wrap"><table class="stats-table"><thead><tr><th>Jugador</th><th>Tiempo total</th><th>1.ª parte</th><th>2.ª parte</th><th>Goles</th><th>Asist.</th><th>Goles a favor en pista</th><th>Goles en contra en pista</th><th>Tarjetas</th></tr></thead><tbody id="stats-body"></tbody></table></div></div></section>
 <section id="view-generales" class="view"><div class="panel"><h2>Estadísticas generales por competición</h2><p class="muted" style="font-size:13px">Elige una competición para ver el acumulado de sus partidos. El historial conserva todos los encuentros.</p><div class="field" style="max-width:420px"><label for="stats-competition-filter">Ver estadísticas de</label><select id="stats-competition-filter" onchange="renderStats()"><option value="__all__">Todas las competiciones</option></select></div><div class="tools"><button class="primary" onclick="exportPDF('view-generales')">Exportar estadísticas generales a PDF</button><button onclick="exportBackup()">Copia de seguridad JSON</button></div><div class="table-wrap"><table class="stats-table"><thead><tr><th>Jugador</th><th>Partidos</th><th>Tiempo total</th><th>Goles</th><th>Asist.</th><th>Goles a favor en pista</th><th>Goles en contra en pista</th><th>Amarillas</th><th>Doble amarilla</th><th>Rojas</th></tr></thead><tbody id="career-stats-body"></tbody></table></div></div></section>
 <section id="view-historial" class="view"><div class="panel"><h2>Historial de partidos</h2><p class="muted" style="font-size:13px">Los partidos guardados aparecerán aquí. Puedes eliminar individualmente los partidos de prueba.</p><div class="tools"><button class="primary" onclick="exportPDF('view-historial')">Exportar historial a PDF</button><button onclick="exportBackup()">Copia de seguridad JSON</button></div><div class="table-wrap"><table class="stats-table"><thead><tr><th>Fecha</th><th>Local/visitante</th><th>Equipo</th><th>Rival</th><th>Competición</th><th>Resultado</th><th>Eventos</th><th>Acciones</th></tr></thead><tbody id="match-history-body"></tbody></table></div></div></section>
-<section id="view-ajustes" class="view"><div class="layout"><div id="cloud-panel" class="panel" style="margin-bottom:12px">
+<section id="saved-match-report" class="panel" style="display:none;margin-top:16px">
+ <h2>Estadísticas del partido</h2>
+ <div class="tools">
+  <button class="primary" onclick="exportPDF('saved-match-report')">Exportar estadísticas a PDF</button>
+  <button onclick="closeSavedMatch()">Cerrar</button>
+ </div>
+ <div id="saved-match-report-content"></div>
+</section>
+  <section id="view-ajustes" class="view"><div class="layout"><div id="cloud-panel" class="panel" style="margin-bottom:12px">
   <h2>☁️ Cuenta y equipo</h2>
   <p class="muted">La sincronización requiere Internet. Tus datos locales se conservan.</p>
   <div class="field">
@@ -232,14 +240,6 @@ function viewSavedMatch(id){
 }
   function deleteSavedMatch(id){if(!confirm('¿Eliminar este partido del historial? Sus estadísticas dejarán de contar en las estadísticas generales.'))return;S.matchHistory=S.matchHistory.filter(m=>m.id!==id);save();renderStats();}
 function clearMatchHistory(){if(!confirm('¿Borrar TODOS los partidos guardados del historial? Esta acción no se puede deshacer.'))return;S.matchHistory=[];save();renderStats();alert('Historial eliminado. El partido actual no se ha modificado.');}
-<section id="saved-match-report" class="panel" style="display:none;margin-top:16px">
- <h2>Estadísticas del partido</h2>
- <div class="tools">
-  <button class="primary" onclick="exportPDF('saved-match-report')">Exportar estadísticas a PDF</button>
-  <button onclick="closeSavedMatch()">Cerrar</button>
- </div>
- <div id="saved-match-report-content"></div>
-</section>
   function newMatch(){if(!confirm('El partido actual se guardará en el historial y se iniciará otro. La plantilla y las estadísticas generales se conservarán. ¿Continuar?'))return;syncClock();archiveCurrentMatch();S.running=false;S.startedAt=null;S.endAt=null;S.scoreNos=0;S.scoreRiv=0;S.foulsNos=0;S.foulsRiv=0;S.period=1;S.remaining=S.halfLength*60;S.startRemaining=S.remaining;S.slots=[null,null,null,null,null];S.events=[];S.players.forEach(p=>{p.secondsP1=0;p.secondsP2=0;p.goals=0;p.assists=0;p.goalsFor=0;p.goalsAgainst=0;p.yellows=0;p.doubleYellows=0;p.reds=0;p.ejected=false;p.plusMinus=0});save();renderAll();switchView('partido')}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 let lastPaintedSecond=null;
